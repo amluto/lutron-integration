@@ -1,1 +1,1 @@
-"""Command-line tools for pylutron-integration."""
+"""Command-line tools for lutron-integration."""

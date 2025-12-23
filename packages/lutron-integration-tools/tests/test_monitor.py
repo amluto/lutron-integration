@@ -1,7 +1,7 @@
 """Tests for the monitor CLI tool."""
 
-from pylutron_integration import devices, types, qse
-from pylutron_integration_cli.monitor import format_device_update
+from lutron_integration import devices, types, qse
+from lutron_integration_tools.monitor import format_device_update
 
 
 def test_format_device_update_basic():

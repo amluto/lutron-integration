@@ -1,7 +1,7 @@
 [project]
 name = "lutron-integration-tools"
 version = "0.0.0"
-description = "Command-line tools for pylutron-integration"
+description = "Command-line tools for lutron-integration"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
