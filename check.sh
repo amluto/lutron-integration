@@ -5,7 +5,7 @@ echo "Running ruff..."
 uv run ruff check
 
 echo "Running mypy..."
-uv run mypy packages/
+uv run ty check packages/
 
 echo "Running tests..."
 uv run pytest packages/*/tests -v
