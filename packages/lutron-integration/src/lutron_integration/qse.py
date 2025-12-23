@@ -31,6 +31,7 @@ from .types import SerialNumber
 # serial number and then trying to change it.  (This appears to be
 # recoverable by rebooting the NWK.)
 
+
 @dataclass
 class DeviceDetails:
     sn: SerialNumber
@@ -42,21 +43,25 @@ class DeviceDetails:
     # and it also contins b'SN', b'INTEGRATIONID', etc.
     raw_attrs: dict[bytes, bytes]
 
-_DETAILS_KEYS = {'SN':'sn',
-                 'INTEGRATIONID':'integration_id',
-                 'FAMILY':'family',
-                 'PRODUCT':'product'}
+
+_DETAILS_KEYS = {
+    "SN": "sn",
+    "INTEGRATIONID": "integration_id",
+    "FAMILY": "family",
+    "PRODUCT": "product",
+}
+
 
 def parse_details(data: bytes) -> list[DeviceDetails]:
     """
     Parse a reply to ?DETAILS into a list of dictionaries, one per device
-    
+
     Each line is formatted as
     ~DETAILS,KEY1:VALUE1,KEY2:VALUE2,...
-    
+
     Args:
         data: Raw bytes containing multiple ~DETAILS lines separated by \r\n
-        
+
     Returns:
         List of dictionaries, where each dict represents one device with
         keys and values as bytes
@@ -64,61 +69,65 @@ def parse_details(data: bytes) -> list[DeviceDetails]:
     result: list[DeviceDetails] = []
 
     # Split into lines
-    lines = data.split(b'\r\n')
+    lines = data.split(b"\r\n")
 
-    if not lines or lines[-1] != b'':
-        raise types.ParseError('~DETAILS list does not split correctly')
+    if not lines or lines[-1] != b"":
+        raise types.ParseError("~DETAILS list does not split correctly")
     lines = lines[:-1]
 
     for line in lines:
         # Check if line starts with ~DETAILS,
-        if not line.startswith(b'~DETAILS,'):
-            raise types.ParseError(f'Unexpected details line: {line!r}')
+        if not line.startswith(b"~DETAILS,"):
+            raise types.ParseError(f"Unexpected details line: {line!r}")
 
         # Remove the ~DETAILS, prefix
         details_str = line[9:]  # len(b'~DETAILS,') == 9
 
         # Split by comma to get key-value pairs
-        pairs = details_str.split(b',')
+        pairs = details_str.split(b",")
 
         attrs: dict[bytes, bytes] = {}
         for pair in pairs:
             # Split by first colon only (values might contain colons)
-            if b':' in pair:
-                key, value = pair.split(b':', 1)
+            if b":" in pair:
+                key, value = pair.split(b":", 1)
                 attrs[key] = value
             else:
-                raise types.ParseError('Details entry {pair!r} has no comma')
+                raise types.ParseError("Details entry {pair!r} has no comma")
 
         device = DeviceDetails(
-            sn = SerialNumber(attrs[b'SN']),
-            integration_id=attrs[b'INTEGRATIONID'],
-            family=attrs[b'FAMILY'],
-            product=attrs[b'PRODUCT'],
-            raw_attrs=attrs)
+            sn=SerialNumber(attrs[b"SN"]),
+            integration_id=attrs[b"INTEGRATIONID"],
+            family=attrs[b"FAMILY"],
+            product=attrs[b"PRODUCT"],
+            raw_attrs=attrs,
+        )
 
         result.append(device)
-    
+
     return result
 
-# TODO: This isn't just QSE.  Homeworks QS, Quantum, and myRoom Plus support this.  
+
+# TODO: This isn't just QSE.  Homeworks QS, Quantum, and myRoom Plus support this.
 @dataclass
 class IntegrationIDRecord:
     iid: bytes
-    style: bytes # either b'DEVICE' or b'OUTPUT'
+    style: bytes  # either b'DEVICE' or b'OUTPUT'
     sn: SerialNumber
+
 
 @dataclass
 class LutronUniverse:
-    devices_by_sn: dict[SerialNumber, DeviceDetails] = field(default_factory = dict)
-    iidmap: types.IntegrationIDMap = field(default_factory = types.IntegrationIDMap)
+    devices_by_sn: dict[SerialNumber, DeviceDetails] = field(default_factory=dict)
+    iidmap: types.IntegrationIDMap = field(default_factory=types.IntegrationIDMap)
 
     # NB: It's possible for devices_by_sn and iidmap to be out of sync
     # with each other if configuration changes between when we read
     # ?DETAILS and ?INTEGRATIONID.
 
+
 async def enumerate_universe(conn: connection.LutronConnection) -> LutronUniverse:
-    all_devices = parse_details(await conn.raw_query(b'?DETAILS,ALL_DEVICES'))
+    all_devices = parse_details(await conn.raw_query(b"?DETAILS,ALL_DEVICES"))
 
     universe = LutronUniverse()
     universe.devices_by_sn = {d.sn: d for d in all_devices}

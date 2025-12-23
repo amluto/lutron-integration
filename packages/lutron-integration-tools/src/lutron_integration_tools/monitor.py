@@ -15,7 +15,7 @@ from lutron_integration import connection, devices, qse
 logging.basicConfig(level=logging.WARNING)
 
 
-def print_device_table(universe: 'qse.LutronUniverse') -> None:
+def print_device_table(universe: "qse.LutronUniverse") -> None:
     """Print a nicely formatted table of devices."""
     if not universe.devices_by_sn:
         print("No devices found.", file=sys.stderr)
@@ -25,17 +25,20 @@ def print_device_table(universe: 'qse.LutronUniverse') -> None:
     rows = []
     for sn in sorted(universe.devices_by_sn.keys(), key=lambda x: x.sn):
         device = universe.devices_by_sn[sn]
-        integration_id = device.integration_id.decode('utf-8', errors='replace')
-        if integration_id == '(Not Set)':
-            integration_id = ''
-        family = device.family.decode('utf-8', errors='replace')
-        product = device.product.decode('utf-8', errors='replace')
-        rows.append((sn.sn.decode('utf-8'), integration_id, family, product))
+        integration_id = device.integration_id.decode("utf-8", errors="replace")
+        if integration_id == "(Not Set)":
+            integration_id = ""
+        family = device.family.decode("utf-8", errors="replace")
+        product = device.product.decode("utf-8", errors="replace")
+        rows.append((sn.sn.decode("utf-8"), integration_id, family, product))
 
     # Calculate column widths
     col_widths = [
         max(len("Serial Number"), max(len(row[0]) for row in rows)),
-        max(len("Integration ID"), max(len(row[1]) for row in rows) if any(row[1] for row in rows) else 0),
+        max(
+            len("Integration ID"),
+            max(len(row[1]) for row in rows) if any(row[1] for row in rows) else 0,
+        ),
         max(len("Family"), max(len(row[2]) for row in rows)),
         max(len("Product"), max(len(row[3]) for row in rows)),
     ]
@@ -53,7 +56,9 @@ def print_device_table(universe: 'qse.LutronUniverse') -> None:
     print("", file=sys.stderr)
 
 
-def format_device_update(update: devices.DeviceUpdate, universe: 'qse.LutronUniverse') -> str:
+def format_device_update(
+    update: devices.DeviceUpdate, universe: "qse.LutronUniverse"
+) -> str:
     """Format a DeviceUpdate nicely for display."""
     sn = update.serial_number
     device = universe.devices_by_sn.get(sn)
@@ -62,18 +67,18 @@ def format_device_update(update: devices.DeviceUpdate, universe: 'qse.LutronUniv
     parts = []
 
     # Serial number
-    sn_str = sn.sn.decode('utf-8', errors='replace')
+    sn_str = sn.sn.decode("utf-8", errors="replace")
     parts.append(f"SN: {sn_str}")
 
     # Integration ID if present
-    if device and device.integration_id != b'(Not Set)':
-        iid = device.integration_id.decode('utf-8', errors='replace')
+    if device and device.integration_id != b"(Not Set)":
+        iid = device.integration_id.decode("utf-8", errors="replace")
         parts.append(f"IID: {iid}")
 
     # Component number, group name, and index
     component_str = f"Component: {update.component}"
     if device:
-        if (group_info := _lookup_component_group(device, update.component)):
+        if group_info := _lookup_component_group(device, update.component):
             group_name, index = group_info
             component_str += f" ({group_name}/{index})"
     parts.append(component_str)
@@ -85,13 +90,17 @@ def format_device_update(update: devices.DeviceUpdate, universe: 'qse.LutronUniv
 
     # Parameters
     if update.value:
-        params_str = ', '.join(v.decode('utf-8', errors='replace') for v in update.value)
+        params_str = ", ".join(
+            v.decode("utf-8", errors="replace") for v in update.value
+        )
         parts.append(f"Value: {params_str}")
 
     return " | ".join(parts)
 
 
-def _lookup_component_group(device_details: qse.DeviceDetails, component_num: int) -> tuple[str, int] | None:
+def _lookup_component_group(
+    device_details: qse.DeviceDetails, component_num: int
+) -> tuple[str, int] | None:
     """Look up a component group and index for a device.
 
     Args:
@@ -131,8 +140,8 @@ async def monitor_device_updates(host: str, username: str, password: str) -> Non
         conn = await connection.login(
             reader,
             writer,
-            username.encode('utf-8'),
-            password.encode('utf-8') if password else None
+            username.encode("utf-8"),
+            password.encode("utf-8") if password else None,
         )
 
         # Enumerate the universe to get the iidmap
@@ -178,14 +187,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Monitor unsolicited device updates from a Lutron QSE-CI-NWK-E hub"
     )
+    parser.add_argument("host", help="IP address or hostname of the Lutron hub")
     parser.add_argument(
-        "host",
-        help="IP address or hostname of the Lutron hub"
-    )
-    parser.add_argument(
-        "-u", "--username",
+        "-u",
+        "--username",
         default="nwk2",
-        help="Username for authentication (default: nwk2)"
+        help="Username for authentication (default: nwk2)",
     )
 
     args = parser.parse_args()

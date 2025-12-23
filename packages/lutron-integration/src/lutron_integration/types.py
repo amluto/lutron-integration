@@ -2,7 +2,8 @@ from dataclasses import dataclass, field
 import re
 from enum import Enum, unique
 
-_SN_RE = re.compile(b'(?:0x)?([0-9A-Fa-f]{0,8})', re.S)
+_SN_RE = re.compile(b"(?:0x)?([0-9A-Fa-f]{0,8})", re.S)
+
 
 # A serial number as reported by the integration access point
 # is an optional 0x followed by
@@ -26,23 +27,24 @@ class SerialNumber:
     def __init__(self, sn: bytes):
         m = _SN_RE.fullmatch(sn)
         if not m:
-            raise ValueError(f'Malformed serial number {sn!r}')
+            raise ValueError(f"Malformed serial number {sn!r}")
         sn = m[1]
-        object.__setattr__(self, 'sn', b'0' * (8 - len(sn)) + sn.upper())
+        object.__setattr__(self, "sn", b"0" * (8 - len(sn)) + sn.upper())
 
     def __repr__(self):
-        return f'SerialNumber({self.sn!r})'
-    
+        return f"SerialNumber({self.sn!r})"
+
     def __str__(self):
         return self.sn.decode()
+
 
 # These are DEVICE actions.  OUTPUT actions are different.
 @unique
 class DeviceAction(Enum):
     ENABLE = 1
     DISABLE = 2
-    PRESS_CLOSE_UNOCC = 3 # Press button or close shades or room unoccupied
-    RELEASE_OPEN_OCC = 4 # Release button or open shades or room occupied
+    PRESS_CLOSE_UNOCC = 3  # Press button or close shades or room unoccupied
+    RELEASE_OPEN_OCC = 4  # Release button or open shades or room occupied
     HOLD = 5
     DOUBLE_TAP = 6
     CURRENT_SCENE = 7
@@ -55,13 +57,14 @@ class DeviceAction(Enum):
     START_RAISING = 18
     START_LOWERING = 19
     STOP_RAISING_LOWERING = 20
-    HOLD_RELEASE = 32 # for keypads -- I have no idea what it does
-    TIMECLOCK_STATE = 34 # 0 = disabled, 1 = enabled
+    HOLD_RELEASE = 32  # for keypads -- I have no idea what it does
+    TIMECLOCK_STATE = 34  # 0 = disabled, 1 = enabled
 
     # 21 is a mysterious property of the SHADE component of shades.
     # It seems to have the value 0 most of the time but has other values when the shade
     # is moving.
     MOTOR_MYSTERY = 21
+
 
 @unique
 class OutputAction(Enum):
@@ -85,17 +88,18 @@ class OutputAction(Enum):
 @dataclass
 class IntegrationIDMap:
     # Maps output integration ids to the device sn and output/zone number
-    output_ids: dict[bytes, tuple[SerialNumber, int]] = field(default_factory = dict)
+    output_ids: dict[bytes, tuple[SerialNumber, int]] = field(default_factory=dict)
 
     # Maps device integration ids to the device sn
-    device_ids: dict[bytes, SerialNumber] = field(default_factory = dict)
+    device_ids: dict[bytes, SerialNumber] = field(default_factory=dict)
 
     # We don't bother storing the reverse mapping anywhere -- we need
     # to be able to control outputs that don't have integration IDs,
     # and there appears to be no benefit to ever sending an #OUTPUT command.
 
+
 class ParseError(Exception):
     """Exception raised when a message doesn't parse correctly."""
-    
+
     def __init__(self, message: str) -> None:
         super().__init__(str)
