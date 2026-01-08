@@ -1,6 +1,6 @@
 [project]
 name = "lutron-integration-workspace-root"
-version = "0.0.0"
+version = "0.0.0a1"
 requires-python = ">=3.12"
 dependencies = [
     "lutron-integration",

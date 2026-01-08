@@ -1,10 +1,26 @@
 [project]
 name = "lutron-integration"
-version = "0.0.0"
-description = "Lutron Integration Protocol client"
+version = "0.0.0a1"
+description = "Lutron Integration Protocol client, focused on QS Standalone"
+authors = [
+  {name = "Andy Lutomirski", email = "luto@kernel.org"}
+]
+maintainers = [
+  {name = "Andy Lutomirski", email = "luto@kernel.org"}
+]
+license = "MIT"
+keywords = ["QSE-CI-NWK-E", "Lutron", "QS Standalone", "Grafik Eye"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+]
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = []
+
+[project.urls]
+Repository = "https://github.com/amluto/lutron-integration"
 
 [build-system]
 requires = ["uv_build >= 0.9.8, <0.10.0"]

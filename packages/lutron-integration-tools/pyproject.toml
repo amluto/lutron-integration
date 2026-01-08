@@ -1,11 +1,17 @@
 [project]
 name = "lutron-integration-tools"
-version = "0.0.0"
+version = "0.0.0a1"
 description = "Command-line tools for lutron-integration"
+keywords = ["QSE-CI-NWK-E", "Lutron", "QS Standalone", "Grafik Eye"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: End Users/Desktop",
+  "Programming Language :: Python :: 3",
+]
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "lutron-integration==0.0.0",
+    "lutron-integration==0.0.0a1",
 ]
 
 [project.scripts]
