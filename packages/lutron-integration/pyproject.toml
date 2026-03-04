@@ -9,6 +9,7 @@ maintainers = [
   {name = "Andy Lutomirski", email = "luto@kernel.org"}
 ]
 license = "MIT"
+license-files = ["LICENSE"]
 keywords = ["QSE-CI-NWK-E", "Lutron", "QS Standalone", "Grafik Eye"]
 classifiers = [
   "Development Status :: 3 - Alpha",
