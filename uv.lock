@@ -6,7 +6,13 @@ requires-python = ">=3.12"
 members = [
     "lutron-integration",
     "lutron-integration-tools",
-    "lutron-integration-workspace-root",
+]
+
+[manifest.dependency-groups]
+dev = [
+    { name = "pytest", specifier = ">=8.4.2" },
+    { name = "ruff", specifier = ">=0.14.4" },
+    { name = "ty", specifier = ">=0.0.5" },
 ]
 
 [[package]]
@@ -42,35 +48,6 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [{ name = "lutron-integration", editable = "packages/lutron-integration" }]
-
-[[package]]
-name = "lutron-integration-workspace-root"
-version = "0.0.0a1"
-source = { virtual = "." }
-dependencies = [
-    { name = "lutron-integration" },
-    { name = "lutron-integration-tools" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pytest" },
-    { name = "ruff" },
-    { name = "ty" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "lutron-integration", editable = "packages/lutron-integration" },
-    { name = "lutron-integration-tools", editable = "packages/lutron-integration-tools" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pytest", specifier = ">=8.4.2" },
-    { name = "ruff", specifier = ">=0.14.4" },
-    { name = "ty", specifier = ">=0.0.5" },
-]
 
 [[package]]
 name = "packaging"
