@@ -1,6 +1,6 @@
 [project]
 name = "lutron-integration"
-version = "0.0.0a1"
+version = "0.0.0a2"
 description = "Lutron Integration Protocol client, focused on QS Standalone"
 authors = [
   {name = "Andy Lutomirski", email = "luto@kernel.org"}

@@ -35,12 +35,12 @@ wheels = [
 
 [[package]]
 name = "lutron-integration"
-version = "0.0.0a1"
+version = "0.0.0a2"
 source = { editable = "packages/lutron-integration" }
 
 [[package]]
 name = "lutron-integration-tools"
-version = "0.0.0a1"
+version = "0.0.0a2"
 source = { editable = "packages/lutron-integration-tools" }
 dependencies = [
     { name = "lutron-integration" },
