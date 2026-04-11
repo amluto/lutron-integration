@@ -1,3 +1,18 @@
+"""
+This is a little shim for recording and replaying a stream connection.
+It's a nearly 100% vibe-coded implementation, and it's extremely sloppy.
+The actual underlying plumbing is absurd (seriously, it uses sockets to
+communicate with itself!).
+
+To be slightly fair, Python's StreamReader and StreamWriter are pretty
+awful -- there is no documented way to create a StreamReader or StreamWriter
+that isn't backed by a socket.  OTOH, this little module uses StreamReaderLike,
+etc., and Python's streams.py strongly suggests that one could attach it
+to a different protocol and transport.
+
+Oh well.
+"""
+
 import asyncio
 import contextlib
 import json
@@ -144,6 +159,61 @@ class RecordedStreamWriter:
         self._tasks.clear()
 
 
+class _OutgoingVerificationState:
+    def __init__(self) -> None:
+        self.written_bytes = 0
+        self.verified_bytes = 0
+        self.progress_event = asyncio.Event()
+        self.observed_failure: BaseException | None = None
+
+
+class _VerifiedStreamWriter:
+    def __init__(
+        self,
+        writer: connection.StreamWriterLike,
+        verify_task: asyncio.Task[None],
+        verify_state: _OutgoingVerificationState,
+    ) -> None:
+        self._writer = writer
+        self._verify_task = verify_task
+        self._verify_state = verify_state
+
+    def _raise_if_verify_failed(self) -> None:
+        if not self._verify_task.done():
+            return
+
+        exception = self._verify_task.exception()
+        if exception is not None:
+            self._verify_state.observed_failure = exception
+            raise exception
+
+    def write(self, data: bytes) -> None:
+        self._raise_if_verify_failed()
+        self._writer.write(data)
+        self._verify_state.written_bytes += len(data)
+
+    async def drain(self) -> None:
+        await self._writer.drain()
+        while (
+            self._verify_state.verified_bytes < self._verify_state.written_bytes
+            and not self._verify_task.done()
+        ):
+            self._verify_state.progress_event.clear()
+            await self._verify_state.progress_event.wait()
+        self._raise_if_verify_failed()
+
+    def close(self) -> None:
+        self._writer.close()
+
+    def is_closing(self) -> bool:
+        return self._writer.is_closing()
+
+    async def wait_closed(self) -> None:
+        await self._writer.wait_closed()
+        await asyncio.sleep(0)
+        self._raise_if_verify_failed()
+
+
 async def open_recorded_stream(
     host: str,
     port: int,
@@ -187,13 +257,17 @@ class ReplayedSession:
         self._peer_writer: connection.StreamWriterLike | None = None
         self._incoming_task: asyncio.Task[None] | None = None
         self._outgoing_task: asyncio.Task[None] | None = None
+        self._outgoing_verify_state = _OutgoingVerificationState()
 
     async def __aenter__(self) -> "ReplayedSession":
-        (self.reader, self.writer), (self._peer_reader, self._peer_writer) = (
+        (self.reader, writer), (self._peer_reader, self._peer_writer) = (
             await create_stream_pair()
         )
         self._incoming_task = asyncio.create_task(self._play_incoming())
         self._outgoing_task = asyncio.create_task(self._verify_outgoing())
+        self.writer = _VerifiedStreamWriter(
+            writer, self._outgoing_task, self._outgoing_verify_state
+        )
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
@@ -217,7 +291,17 @@ class ReplayedSession:
             data = await self._peer_reader.read(_CHUNK_SIZE)
             if not data:
                 break
+            next_expected = expected[len(actual) : len(actual) + len(data)]
+            if len(next_expected) != len(data) or data != next_expected:
+                actual.extend(data)
+                self._outgoing_verify_state.verified_bytes = len(actual)
+                self._outgoing_verify_state.progress_event.set()
+                raise AssertionError(
+                    f"Outgoing stream mismatch:\nexpected={expected!r}\nactual={bytes(actual)!r}"
+                )
             actual.extend(data)
+            self._outgoing_verify_state.verified_bytes = len(actual)
+            self._outgoing_verify_state.progress_event.set()
 
         if bytes(actual) != expected:
             raise AssertionError(
@@ -239,4 +323,8 @@ class ReplayedSession:
                 await self._peer_writer.wait_closed()
 
         if self._outgoing_task is not None:
-            await self._outgoing_task
+            try:
+                await self._outgoing_task
+            except AssertionError as err:
+                if self._outgoing_verify_state.observed_failure is not err:
+                    raise

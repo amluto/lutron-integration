@@ -73,6 +73,55 @@ def test_replayed_session_raises_on_outgoing_mismatch() -> None:
     asyncio.run(run_test())
 
 
+def test_replayed_session_raises_on_first_inconsistent_write() -> None:
+    async def run_test() -> None:
+        async with ReplayedSession(
+            [
+                SessionEvent(direction="outgoing", contents=b"hello"),
+                SessionEvent(direction="outgoing", contents=b"world"),
+            ]
+        ) as replayed:
+            assert replayed.writer is not None
+
+            replayed.writer.write(b"hello")
+            await replayed.writer.drain()
+
+            replayed.writer.write(b"there")
+            with pytest.raises(AssertionError, match="Outgoing stream mismatch"):
+                await replayed.writer.drain()
+
+    asyncio.run(run_test())
+
+
+def test_replayed_session_handles_multiple_reads_and_writes() -> None:
+    async def run_test() -> None:
+        async with ReplayedSession(
+            [
+                SessionEvent(direction="incoming", contents=b"abc"),
+                SessionEvent(direction="incoming", contents=b"defg"),
+                SessionEvent(direction="outgoing", contents=b"hello"),
+                SessionEvent(direction="outgoing", contents=b"world"),
+            ]
+        ) as replayed:
+            assert replayed.reader is not None
+            assert replayed.writer is not None
+
+            assert await replayed.reader.readexactly(2) == b"ab"
+            assert await replayed.reader.readexactly(2) == b"cd"
+            assert await replayed.reader.readexactly(3) == b"efg"
+
+            replayed.writer.write(b"he")
+            await replayed.writer.drain()
+            replayed.writer.write(b"llo")
+            await replayed.writer.drain()
+            replayed.writer.write(b"wor")
+            await replayed.writer.drain()
+            replayed.writer.write(b"ld")
+            await replayed.writer.drain()
+
+    asyncio.run(run_test())
+
+
 def test_write_session_event_jsonl_line_round_trip(tmp_path: Path) -> None:
     path = tmp_path / "session.jsonl"
     events = [
@@ -92,9 +141,13 @@ def test_open_recorded_stream_captures_both_directions(tmp_path: Path) -> None:
         async def handle_client(
             reader: asyncio.StreamReader, writer: asyncio.StreamWriter
         ) -> None:
-            writer.write(b"server->client")
+            writer.write(b"server->")
             await writer.drain()
-            assert await reader.readexactly(14) == b"client->server"
+            writer.write(b"client")
+            await writer.drain()
+
+            assert await reader.readexactly(7) == b"client-"
+            assert await reader.readexactly(7) == b">server"
             writer.close()
             await writer.wait_closed()
 
@@ -107,8 +160,12 @@ def test_open_recorded_stream_captures_both_directions(tmp_path: Path) -> None:
 
             reader, writer = await open_recorded_stream(host, port, events.append)
 
-            assert await reader.readexactly(14) == b"server->client"
-            writer.write(b"client->server")
+            assert await reader.readexactly(7) == b"server-"
+            assert await reader.readexactly(7) == b">client"
+
+            writer.write(b"client-")
+            await writer.drain()
+            writer.write(b">server")
             await writer.drain()
             writer.close()
             await writer.wait_closed()
