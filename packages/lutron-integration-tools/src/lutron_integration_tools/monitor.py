@@ -219,7 +219,7 @@ def main() -> None:
                     recorded_session.write_session_event_jsonl_line(record_file, event)
                     record_file.flush()
 
-                reader, writer = await recorded_session.open_recorded_stream(
+                reader, writer = await recorded_session.open_and_record_stream(
                     args.host, 23, record_event
                 )
 

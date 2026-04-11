@@ -30,28 +30,37 @@ _CHUNK_SIZE = 65536
 Direction = Literal["incoming", "outgoing"]
 
 
-class JsonSessionEvent(TypedDict):
+class JsonSessionEvent(TypedDict, total=False):
     dir: Direction
     contents: str
+    redacted: bool
 
 
 @dataclass(frozen=True)
 class SessionEvent:
     direction: Direction
     contents: bytes
+    is_redacted: bool = False
 
     def serialize(self) -> JsonSessionEvent:
-        return {
+        event: JsonSessionEvent = {
             "dir": self.direction,
             "contents": self.contents.decode("latin-1"),
         }
+        if self.is_redacted:
+            event["redacted"] = True
+        return event
 
     @classmethod
     def deserialize_from(cls, event: JsonSessionEvent) -> Self:
         direction = event["dir"]
         if direction not in ("incoming", "outgoing"):
             raise ValueError(f"Unsupported session direction: {direction!r}")
-        return cls(direction=direction, contents=event["contents"].encode("latin-1"))
+        return cls(
+            direction=direction,
+            contents=event["contents"].encode("latin-1"),
+            is_redacted=event.get("redacted", False),
+        )
 
 def session_to_jsonable(events: Sequence[SessionEvent]) -> list[JsonSessionEvent]:
     return [event.serialize() for event in events]
@@ -123,40 +132,38 @@ async def create_stream_pair() -> tuple[
 class RecordedStreamWriter:
     def __init__(
         self,
-        proxy_writer: connection.StreamWriterLike,
         remote_writer: connection.StreamWriterLike,
-        tasks: list[asyncio.Task[None]],
+        incoming_task: asyncio.Task[None],
+        event_callback: Callable[[SessionEvent], None],
     ) -> None:
-        self._proxy_writer = proxy_writer
         self._remote_writer = remote_writer
-        self._tasks = tasks
+        self._incoming_task = incoming_task
+        self._event_callback = event_callback
 
     def write(self, data: bytes) -> None:
-        self._proxy_writer.write(data)
+        self._event_callback(SessionEvent(direction="outgoing", contents=data))
+        self._remote_writer.write(data)
+
+    def write_and_redact(self, *, real: bytes, redacted: bytes) -> None:
+        self._event_callback(
+            SessionEvent(direction="outgoing", contents=redacted, is_redacted=True)
+        )
+        self._remote_writer.write(real)
 
     async def drain(self) -> None:
-        await self._proxy_writer.drain()
+        await self._remote_writer.drain()
 
     def close(self) -> None:
-        self._proxy_writer.close()
+        self._remote_writer.close()
 
     def is_closing(self) -> bool:
-        return self._proxy_writer.is_closing()
+        return self._remote_writer.is_closing()
 
     async def wait_closed(self) -> None:
-        with contextlib.suppress(Exception):
-            await self._proxy_writer.wait_closed()
-
-        for task in self._tasks:
-            with contextlib.suppress(Exception):
-                await task
-
         if not self._remote_writer.is_closing():
             self._remote_writer.close()
-            with contextlib.suppress(Exception):
-                await self._remote_writer.wait_closed()
-
-        self._tasks.clear()
+        with contextlib.suppress(Exception):
+            await self._incoming_task
 
 
 class _ReplayedStreamWriter:
@@ -200,39 +207,36 @@ class _ReplayedStreamWriter:
             if not self._failure_observed:
                 self._raise_mismatch()
 
+def write_and_redact(
+    stream: connection.StreamWriterLike, *, real: bytes, redacted: bytes
+) -> None:
+    if isinstance(stream, RecordedStreamWriter):
+        stream.write_and_redact(real=real, redacted=redacted)
+        return
+    stream.write(real)
 
-async def open_recorded_stream(
+
+async def open_and_record_stream(
     host: str,
     port: int,
     event_callback: Callable[[SessionEvent], None],
 ) -> tuple[connection.StreamReaderLike, RecordedStreamWriter]:
     remote_reader, remote_writer = await asyncio.open_connection(host, port)
-    (reader, proxy_writer), (proxy_reader, proxy_peer_writer) = await create_stream_pair()
+    reader = asyncio.StreamReader()
 
-    async def pump(
-        src: connection.StreamReaderLike,
-        dst: connection.StreamWriterLike,
-        direction: Direction,
-    ) -> None:
+    async def pump_incoming() -> None:
         try:
             while True:
-                data = await src.read(_CHUNK_SIZE)
+                data = await remote_reader.read(_CHUNK_SIZE)
                 if not data:
                     return
-                event_callback(SessionEvent(direction=direction, contents=data))
-                dst.write(data)
-                await dst.drain()
+                event_callback(SessionEvent(direction="incoming", contents=data))
+                reader.feed_data(data)
         finally:
-            if not dst.is_closing():
-                dst.close()
-                with contextlib.suppress(Exception):
-                    await dst.wait_closed()
+            reader.feed_eof()
 
-    tasks = [
-        asyncio.create_task(pump(proxy_reader, remote_writer, "outgoing")),
-        asyncio.create_task(pump(remote_reader, proxy_peer_writer, "incoming")),
-    ]
-    return reader, RecordedStreamWriter(proxy_writer, remote_writer, tasks)
+    incoming_task = asyncio.create_task(pump_incoming())
+    return reader, RecordedStreamWriter(remote_writer, incoming_task, event_callback)
 
 
 class ReplayedSession:

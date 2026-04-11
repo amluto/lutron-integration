@@ -187,7 +187,7 @@ def test_monitor_device_updates_writes_recording_callback(tmp_path) -> None:
 
         captured_callbacks = []
 
-        async def fake_open_recorded_stream(host, port, event_callback):
+        async def fake_open_and_record_stream(host, port, event_callback):
             captured_callbacks.append(event_callback)
             event_callback(
                 monitor.recorded_session.SessionEvent(
@@ -199,8 +199,8 @@ def test_monitor_device_updates_writes_recording_callback(tmp_path) -> None:
         with (
             patch.object(
                 monitor.recorded_session,
-                "open_recorded_stream",
-                side_effect=fake_open_recorded_stream,
+                "open_and_record_stream",
+                side_effect=fake_open_and_record_stream,
             ),
             patch.object(monitor.connection, "login", AsyncMock(return_value=fake_conn)),
             patch.object(
@@ -217,7 +217,7 @@ def test_monitor_device_updates_writes_recording_callback(tmp_path) -> None:
                     )
                     record_file.flush()
 
-                reader, writer = await monitor.recorded_session.open_recorded_stream(
+                reader, writer = await monitor.recorded_session.open_and_record_stream(
                     "192.0.2.10", 23, record_event
                 )
                 try:
