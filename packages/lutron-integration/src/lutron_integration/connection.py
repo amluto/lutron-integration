@@ -4,6 +4,7 @@ import re
 import collections
 from collections.abc import Callable, Iterable
 import logging
+from typing import Protocol
 from . import types
 
 _LOGGER = logging.getLogger(__name__)
@@ -57,10 +58,32 @@ class DisconnectedError(Exception):
         super().__init__("Disconnected")
 
 
+class StreamReaderLike(Protocol):
+    async def read(self, n: int = -1) -> bytes: ...
+
+    async def readline(self) -> bytes: ...
+
+    async def readexactly(self, n: int) -> bytes: ...
+
+    async def readuntil(self, separator: bytes = b"\n") -> bytes: ...
+
+
+class StreamWriterLike(Protocol):
+    def write(self, data: bytes) -> None: ...
+
+    async def drain(self) -> None: ...
+
+    def close(self) -> None: ...
+
+    async def wait_closed(self) -> None: ...
+
+    def is_closing(self) -> bool: ...
+
+
 @dataclass
 class _Conn:
-    r: asyncio.StreamReader
-    w: asyncio.StreamWriter
+    r: StreamReaderLike
+    w: StreamWriterLike
 
 
 @dataclass
@@ -124,7 +147,7 @@ class LutronConnection:
     # TODO: We should possibly track when we are in a bad state and quickly fail future operations
 
     def __init__(
-        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+        self, reader: StreamReaderLike, writer: StreamWriterLike
     ) -> None:
         self.__conn = _Conn(reader, writer)
         self.__lock = asyncio.Lock()
@@ -135,7 +158,7 @@ class LutronConnection:
 
     @classmethod
     async def create_from_connnection(
-        cls, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+        cls, reader: StreamReaderLike, writer: StreamWriterLike
     ) -> "LutronConnection":
         self = LutronConnection(reader, writer)
         assert self.__conn is not None
@@ -407,8 +430,8 @@ class LutronConnection:
 
 
 async def login(
-    reader: asyncio.StreamReader,
-    writer: asyncio.StreamWriter,
+    reader: StreamReaderLike,
+    writer: StreamWriterLike,
     username: bytes,
     password: None | bytes,
 ) -> LutronConnection:

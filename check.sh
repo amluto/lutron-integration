@@ -1,13 +1,12 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
 
-echo "Running ruff..."
-uv run ruff check
+set -u
 
-echo "Running mypy..."
-uv run ty check packages/
+cd "$(dirname "$0")"
 
-echo "Running tests..."
-uv run pytest packages/*/tests -v
+status=0
 
-echo "All checks passed!"
+uv run ty check . || status=1
+uv run pytest || status=1
+
+exit "$status"
