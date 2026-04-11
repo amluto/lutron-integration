@@ -7,9 +7,10 @@ import asyncio
 import argparse
 import getpass
 import logging
+from pathlib import Path
 import sys
 
-from lutron_integration import connection, devices, qse
+from lutron_integration import connection, devices, qse, recorded_session
 
 
 logging.basicConfig(level=logging.WARNING)
@@ -124,7 +125,13 @@ def _lookup_component_group(
     return (group.name, index)
 
 
-async def monitor_device_updates(host: str, username: str, password: str) -> None:
+async def monitor_device_updates(
+    host: str,
+    reader: asyncio.StreamReader,
+    writer: asyncio.StreamWriter,
+    username: str,
+    password: str,
+) -> None:
     """
     Connect to a Lutron hub and monitor device updates.
 
@@ -133,8 +140,6 @@ async def monitor_device_updates(host: str, username: str, password: str) -> Non
         username: Username for authentication
         password: Password for authentication
     """
-    reader, writer = await asyncio.open_connection(host, 23)
-
     try:
         # Log in to the device
         conn = await connection.login(
@@ -170,16 +175,12 @@ async def monitor_device_updates(host: str, username: str, password: str) -> Non
                 break
             except Exception as e:
                 print(f"Error processing message: {e}", file=sys.stderr)
-
     except connection.LoginError as e:
         print(f"Login failed: {e}", file=sys.stderr)
         sys.exit(1)
     except Exception as e:
         print(f"Connection error: {e}", file=sys.stderr)
         sys.exit(1)
-    finally:
-        writer.close()
-        await writer.wait_closed()
 
 
 def main() -> None:
@@ -194,6 +195,11 @@ def main() -> None:
         default="nwk2",
         help="Username for authentication (default: nwk2)",
     )
+    parser.add_argument(
+        "--record",
+        help="Write a JSON recording of the raw connection to this file",
+        metavar='OUTPUT_FILE.json'
+    )
 
     args = parser.parse_args()
 
@@ -202,7 +208,33 @@ def main() -> None:
 
     # Run the monitoring loop
     try:
-        asyncio.run(monitor_device_updates(args.host, args.username, password))
+        async def run() -> str | None:
+            if args.record is None:
+                reader, writer = await asyncio.open_connection(args.host, 23)
+            else:
+                reader, writer = await recorded_session.open_recorded_connection(
+                    args.host, 23
+                )
+
+            try:
+                await monitor_device_updates(
+                    args.host,
+                    reader,
+                    writer,
+                    args.username,
+                    password,
+                )
+            finally:
+                writer.close()
+                await writer.wait_closed()
+
+            if args.record is not None:
+                writer.write_session_file(Path(args.record))
+            return args.record
+
+        record_path = asyncio.run(run())
+        if record_path is not None:
+            print(f"Wrote session recording to {record_path}", file=sys.stderr)
     except KeyboardInterrupt:
         print("\nDisconnected.", file=sys.stderr)
         sys.exit(0)

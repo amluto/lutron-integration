@@ -1,6 +1,11 @@
 """Tests for the monitor CLI tool."""
 
+import asyncio
+from argparse import Namespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
 from lutron_integration import devices, types, qse
+from lutron_integration_tools import monitor
 from lutron_integration_tools.monitor import format_device_update
 
 
@@ -144,3 +149,75 @@ def test_format_device_update_unknown_device():
     assert "Component: 5" in result
     assert "Action: LIGHT_LEVEL(14)" in result
     assert "Value: 75.00" in result
+
+
+def test_main_passes_record_option() -> None:
+    with (
+        patch.object(
+            monitor.argparse.ArgumentParser,
+            "parse_args",
+            return_value=Namespace(
+                host="192.0.2.10", username="nwk2", record="session.json"
+            ),
+        ),
+        patch.object(monitor.getpass, "getpass", return_value="secret"),
+        patch.object(monitor.asyncio, "run") as mock_run,
+    ):
+        monitor.main()
+
+    mock_run.assert_called_once()
+    coro = mock_run.call_args.args[0]
+    assert coro.cr_code.co_name == "run"
+    coro.close()
+
+
+def test_monitor_device_updates_writes_recording(tmp_path) -> None:
+    async def run_test() -> None:
+        fake_reader = AsyncMock()
+        fake_writer = MagicMock()
+        fake_writer.close = MagicMock()
+        fake_writer.wait_closed = AsyncMock(return_value=None)
+        fake_writer.write_session_file = MagicMock()
+
+        fake_conn = AsyncMock()
+        fake_conn.read_unsolicited.side_effect = asyncio.CancelledError()
+
+        universe = qse.LutronUniverse(
+            devices_by_sn={}, iidmap=types.IntegrationIDMap()
+        )
+
+        with (
+            patch.object(
+                monitor.recorded_session,
+                "open_recorded_connection",
+                AsyncMock(return_value=(fake_reader, fake_writer)),
+            ),
+            patch.object(monitor.connection, "login", AsyncMock(return_value=fake_conn)),
+            patch.object(
+                monitor.qse, "enumerate_universe", AsyncMock(return_value=universe)
+            ),
+        ):
+            async def run() -> None:
+                reader, writer = await monitor.recorded_session.open_recorded_connection(
+                    "192.0.2.10", 23
+                )
+                try:
+                    await monitor.monitor_device_updates(
+                        "192.0.2.10",
+                        reader,
+                        writer,
+                        "nwk2",
+                        "secret",
+                    )
+                finally:
+                    writer.close()
+                    await writer.wait_closed()
+                writer.write_session_file(tmp_path / "recording.json")
+
+            await run()
+
+        fake_writer.close.assert_called_once()
+        fake_writer.wait_closed.assert_awaited_once()
+        fake_writer.write_session_file.assert_called_once()
+
+    asyncio.run(run_test())
