@@ -14,14 +14,15 @@ _LOGGER = logging.getLogger(__name__)
 # reply.  We consider a query to be answered when we receive a synchronous
 # reply followed by a prompt.
 #
-# This appears to be completely reliably on QSE-CI-NWK-E with one
+# This appears to be completely reliable on QSE-CI-NWK-E with one
 # exception: #OUTPUT and ?OUTPUT commands, at least on verrsion
 # 8.60, produce no output per se.  The NWK sends a ~OUTPUT, but
 # that's entirely indistinguishable from an *unsolicited* message.
 #
 # The best solution found so far is to avoid ever sending #OUTPUT
 # or ?OUTPUT, which, conveniently, is never necessary on QS
-# standalone, as #DEVICE and ?DEVICE handle all cases and more.
+# standalone, as #DEVICE and ?DEVICE can handle outputs with and without
+# assigned integrationids and have a superset of OUTPUT's functionality.
 _REPLY_PREFIXES = [
     b"~DETAILS",
     b"~ERROR",
