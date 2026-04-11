@@ -159,59 +159,46 @@ class RecordedStreamWriter:
         self._tasks.clear()
 
 
-class _OutgoingVerificationState:
-    def __init__(self) -> None:
-        self.written_bytes = 0
-        self.verified_bytes = 0
-        self.progress_event = asyncio.Event()
-        self.observed_failure: BaseException | None = None
+class _ReplayedStreamWriter:
+    def __init__(self, expected: bytes) -> None:
+        self._expected = expected
+        self._actual = bytearray()
+        self._is_closing = False
+        self._failure: AssertionError | None = None
+        self._failure_observed = False
 
-
-class _VerifiedStreamWriter:
-    def __init__(
-        self,
-        writer: connection.StreamWriterLike,
-        verify_task: asyncio.Task[None],
-        verify_state: _OutgoingVerificationState,
-    ) -> None:
-        self._writer = writer
-        self._verify_task = verify_task
-        self._verify_state = verify_state
-
-    def _raise_if_verify_failed(self) -> None:
-        if not self._verify_task.done():
-            return
-
-        exception = self._verify_task.exception()
-        if exception is not None:
-            self._verify_state.observed_failure = exception
-            raise exception
+    def _raise_mismatch(self) -> None:
+        if self._failure is None:
+            self._failure = AssertionError(
+                f"Outgoing stream mismatch:\nexpected={self._expected!r}\nactual={bytes(self._actual)!r}"
+            )
+        self._failure_observed = True
+        raise self._failure
 
     def write(self, data: bytes) -> None:
-        self._raise_if_verify_failed()
-        self._writer.write(data)
-        self._verify_state.written_bytes += len(data)
+        if self._is_closing:
+            raise RuntimeError("Cannot write to closing stream")
+
+        next_expected = self._expected[len(self._actual) : len(self._actual) + len(data)]
+        self._actual.extend(data)
+
+        if len(next_expected) != len(data) or data != next_expected:
+            self._raise_mismatch()
 
     async def drain(self) -> None:
-        await self._writer.drain()
-        while (
-            self._verify_state.verified_bytes < self._verify_state.written_bytes
-            and not self._verify_task.done()
-        ):
-            self._verify_state.progress_event.clear()
-            await self._verify_state.progress_event.wait()
-        self._raise_if_verify_failed()
+        return None
 
     def close(self) -> None:
-        self._writer.close()
+        self._is_closing = True
 
     def is_closing(self) -> bool:
-        return self._writer.is_closing()
+        return self._is_closing
 
     async def wait_closed(self) -> None:
-        await self._writer.wait_closed()
-        await asyncio.sleep(0)
-        self._raise_if_verify_failed()
+        self._is_closing = True
+        if bytes(self._actual) != self._expected:
+            if not self._failure_observed:
+                self._raise_mismatch()
 
 
 async def open_recorded_stream(
@@ -253,78 +240,37 @@ class ReplayedSession:
         self._events = list(events)
         self.reader: connection.StreamReaderLike | None = None
         self.writer: connection.StreamWriterLike | None = None
-        self._peer_reader: connection.StreamReaderLike | None = None
-        self._peer_writer: connection.StreamWriterLike | None = None
         self._incoming_task: asyncio.Task[None] | None = None
-        self._outgoing_task: asyncio.Task[None] | None = None
-        self._outgoing_verify_state = _OutgoingVerificationState()
 
     async def __aenter__(self) -> "ReplayedSession":
-        (self.reader, writer), (self._peer_reader, self._peer_writer) = (
-            await create_stream_pair()
+        reader = asyncio.StreamReader()
+        self.reader = reader
+        self.writer = _ReplayedStreamWriter(
+            b"".join(
+                event.contents
+                for event in self._events
+                if event.direction == "outgoing"
+            )
         )
         self._incoming_task = asyncio.create_task(self._play_incoming())
-        self._outgoing_task = asyncio.create_task(self._verify_outgoing())
-        self.writer = _VerifiedStreamWriter(
-            writer, self._outgoing_task, self._outgoing_verify_state
-        )
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
         await self.aclose()
 
     async def _play_incoming(self) -> None:
-        assert self._peer_writer is not None
+        assert isinstance(self.reader, asyncio.StreamReader)
         for event in self._events:
             if event.direction != "incoming":
                 continue
-            self._peer_writer.write(event.contents)
-            await self._peer_writer.drain()
-
-    async def _verify_outgoing(self) -> None:
-        assert self._peer_reader is not None
-        expected = b"".join(
-            event.contents for event in self._events if event.direction == "outgoing"
-        )
-        actual = bytearray()
-        while True:
-            data = await self._peer_reader.read(_CHUNK_SIZE)
-            if not data:
-                break
-            next_expected = expected[len(actual) : len(actual) + len(data)]
-            if len(next_expected) != len(data) or data != next_expected:
-                actual.extend(data)
-                self._outgoing_verify_state.verified_bytes = len(actual)
-                self._outgoing_verify_state.progress_event.set()
-                raise AssertionError(
-                    f"Outgoing stream mismatch:\nexpected={expected!r}\nactual={bytes(actual)!r}"
-                )
-            actual.extend(data)
-            self._outgoing_verify_state.verified_bytes = len(actual)
-            self._outgoing_verify_state.progress_event.set()
-
-        if bytes(actual) != expected:
-            raise AssertionError(
-                f"Outgoing stream mismatch:\nexpected={expected!r}\nactual={bytes(actual)!r}"
-            )
+            self.reader.feed_data(event.contents)
+            await asyncio.sleep(0)
+        self.reader.feed_eof()
 
     async def aclose(self) -> None:
         if self.writer is not None and not self.writer.is_closing():
             self.writer.close()
-            with contextlib.suppress(Exception):
-                await self.writer.wait_closed()
+            await self.writer.wait_closed()
 
         if self._incoming_task is not None:
             await self._incoming_task
-
-        if self._peer_writer is not None and not self._peer_writer.is_closing():
-            self._peer_writer.close()
-            with contextlib.suppress(Exception):
-                await self._peer_writer.wait_closed()
-
-        if self._outgoing_task is not None:
-            try:
-                await self._outgoing_task
-            except AssertionError as err:
-                if self._outgoing_verify_state.observed_failure is not err:
-                    raise

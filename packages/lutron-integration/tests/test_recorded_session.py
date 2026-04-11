@@ -86,9 +86,8 @@ def test_replayed_session_raises_on_first_inconsistent_write() -> None:
             replayed.writer.write(b"hello")
             await replayed.writer.drain()
 
-            replayed.writer.write(b"there")
             with pytest.raises(AssertionError, match="Outgoing stream mismatch"):
-                await replayed.writer.drain()
+                replayed.writer.write(b"there")
 
     asyncio.run(run_test())
 
