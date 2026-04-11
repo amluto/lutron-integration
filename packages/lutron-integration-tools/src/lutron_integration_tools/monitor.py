@@ -127,8 +127,8 @@ def _lookup_component_group(
 
 async def monitor_device_updates(
     host: str,
-    reader: asyncio.StreamReader,
-    writer: asyncio.StreamWriter,
+    reader: connection.StreamReaderLike,
+    writer: connection.StreamWriterLike,
     username: str,
     password: str,
 ) -> None:
@@ -197,8 +197,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--record",
-        help="Write a JSON recording of the raw connection to this file",
-        metavar='OUTPUT_FILE.json'
+        help="Write a JSONL recording of the raw connection to this file",
+        metavar="OUTPUT_FILE.jsonl",
     )
 
     args = parser.parse_args()
@@ -209,11 +209,18 @@ def main() -> None:
     # Run the monitoring loop
     try:
         async def run() -> str | None:
+            record_file = None
             if args.record is None:
                 reader, writer = await asyncio.open_connection(args.host, 23)
             else:
-                reader, writer = await recorded_session.open_recorded_connection(
-                    args.host, 23
+                record_file = Path(args.record).open("w", encoding="utf-8")
+
+                def record_event(event: recorded_session.SessionEvent) -> None:
+                    recorded_session.write_session_event_jsonl_line(record_file, event)
+                    record_file.flush()
+
+                reader, writer = await recorded_session.open_recorded_stream(
+                    args.host, 23, record_event
                 )
 
             try:
@@ -227,9 +234,9 @@ def main() -> None:
             finally:
                 writer.close()
                 await writer.wait_closed()
+                if record_file is not None:
+                    record_file.close()
 
-            if args.record is not None:
-                writer.write_session_file(Path(args.record))
             return args.record
 
         record_path = asyncio.run(run())

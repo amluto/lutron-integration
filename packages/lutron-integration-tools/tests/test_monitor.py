@@ -171,13 +171,12 @@ def test_main_passes_record_option() -> None:
     coro.close()
 
 
-def test_monitor_device_updates_writes_recording(tmp_path) -> None:
+def test_monitor_device_updates_writes_recording_callback(tmp_path) -> None:
     async def run_test() -> None:
         fake_reader = AsyncMock()
         fake_writer = MagicMock()
         fake_writer.close = MagicMock()
         fake_writer.wait_closed = AsyncMock(return_value=None)
-        fake_writer.write_session_file = MagicMock()
 
         fake_conn = AsyncMock()
         fake_conn.read_unsolicited.side_effect = asyncio.CancelledError()
@@ -186,11 +185,22 @@ def test_monitor_device_updates_writes_recording(tmp_path) -> None:
             devices_by_sn={}, iidmap=types.IntegrationIDMap()
         )
 
+        captured_callbacks = []
+
+        async def fake_open_recorded_stream(host, port, event_callback):
+            captured_callbacks.append(event_callback)
+            event_callback(
+                monitor.recorded_session.SessionEvent(
+                    direction="incoming", contents=b"server->client"
+                )
+            )
+            return (fake_reader, fake_writer)
+
         with (
             patch.object(
                 monitor.recorded_session,
-                "open_recorded_connection",
-                AsyncMock(return_value=(fake_reader, fake_writer)),
+                "open_recorded_stream",
+                side_effect=fake_open_recorded_stream,
             ),
             patch.object(monitor.connection, "login", AsyncMock(return_value=fake_conn)),
             patch.object(
@@ -198,8 +208,17 @@ def test_monitor_device_updates_writes_recording(tmp_path) -> None:
             ),
         ):
             async def run() -> None:
-                reader, writer = await monitor.recorded_session.open_recorded_connection(
-                    "192.0.2.10", 23
+                record_path = tmp_path / "recording.jsonl"
+                record_file = record_path.open("w", encoding="utf-8")
+
+                def record_event(event) -> None:
+                    monitor.recorded_session.write_session_event_jsonl_line(
+                        record_file, event
+                    )
+                    record_file.flush()
+
+                reader, writer = await monitor.recorded_session.open_recorded_stream(
+                    "192.0.2.10", 23, record_event
                 )
                 try:
                     await monitor.monitor_device_updates(
@@ -212,12 +231,18 @@ def test_monitor_device_updates_writes_recording(tmp_path) -> None:
                 finally:
                     writer.close()
                     await writer.wait_closed()
-                writer.write_session_file(tmp_path / "recording.json")
+                    record_file.close()
+
+                assert monitor.recorded_session.read_session_file(record_path) == [
+                    monitor.recorded_session.SessionEvent(
+                        direction="incoming", contents=b"server->client"
+                    )
+                ]
 
             await run()
 
+        assert len(captured_callbacks) == 1
         fake_writer.close.assert_called_once()
         fake_writer.wait_closed.assert_awaited_once()
-        fake_writer.write_session_file.assert_called_once()
 
     asyncio.run(run_test())
