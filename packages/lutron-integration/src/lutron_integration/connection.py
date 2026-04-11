@@ -456,7 +456,13 @@ async def login(
     await reader.readuntil(b"login: ")
 
     # Send the username (line-oriented protocol requires newline)
-    writer.write(username + b"\r\n")
+    from . import recorded_session
+
+    recorded_session.write_and_redact(
+        writer,
+        real=username + b"\r\n",
+        redacted=b"<redacted username>\r\n",
+    )
     await writer.drain()
 
     # Read the server's response

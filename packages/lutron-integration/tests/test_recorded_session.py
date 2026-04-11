@@ -1,9 +1,11 @@
 import asyncio
 import json
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from lutron_integration import connection
 from lutron_integration.recorded_session import (
     ReplayedSession,
     SessionEvent,
@@ -278,6 +280,54 @@ def test_open_and_record_stream_records_redacted_write(tmp_path: Path) -> None:
                 SessionEvent(
                     direction="outgoing", contents=b"******", is_redacted=True
                 )
+            ]
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(run_test())
+
+
+def test_login_records_redacted_username() -> None:
+    async def run_test() -> None:
+        async def handle_client(
+            reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+        ) -> None:
+            writer.write(b"login: ")
+            await writer.drain()
+            assert await reader.readexactly(6) == b"nwk2\r\n"
+            writer.write(b"connection established\r\n")
+            await writer.drain()
+            writer.close()
+            await writer.wait_closed()
+
+        server = await asyncio.start_server(handle_client, "127.0.0.1", 0)
+        try:
+            sock = server.sockets[0]
+            host, port = sock.getsockname()[0:2]
+            events: list[SessionEvent] = []
+            reader, writer = await open_and_record_stream(host, port, events.append)
+
+            with patch.object(
+                connection.LutronConnection,
+                "create_from_connnection",
+                AsyncMock(return_value=object()),
+            ) as mock_create:
+                await connection.login(reader, writer, b"nwk2", None)
+
+            writer.close()
+            await writer.wait_closed()
+            mock_create.assert_awaited_once_with(reader, writer)
+            assert events == [
+                SessionEvent(direction="incoming", contents=b"login: "),
+                SessionEvent(
+                    direction="outgoing",
+                    contents=b"<redacted username>\r\n",
+                    is_redacted=True,
+                ),
+                SessionEvent(
+                    direction="incoming", contents=b"connection established\r\n"
+                ),
             ]
         finally:
             server.close()
